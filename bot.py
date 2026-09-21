@@ -6,7 +6,6 @@ import vk_api
 from flask import Flask
 
 # === НАСТРОЙКИ ТОКЕНОВ ===
-# Вставьте сюда ваши настоящие токены внутри кавычек
 TELEGRAM_TOKEN = "8311376717:AAEftfCMxf_GdMIf8h7gcFBV0RAvraMuSQw"
 VK_TOKEN = "bd024558bd024558bd02455812be41a353bbd02bd024558d7adb85384607e6310595f8c"
 
@@ -18,9 +17,9 @@ app = Flask(__name__)
 def home():
     return "Сервер работает, бот активен!"
 
-# === ТОЧНЫЕ РЕГУЛЯРНЫЕ ВЫРАЖЕНИЯ ===
+# === ФИЛЬТРЫ РЕГИОНОВ И МУСОРА ===
 
-# 1. Москва и Подмосковье (включая Троицк, Лыткарино, Лобню)
+# Разрешенные регионы (Москва, Подмосковье, Лобня, Троицк, Лыткарино и т.д.)
 MOSCOW_MO_PATTERNS = [
     r'\bмосква\b', r'\bмоскве\b', r'\bмоскву\b', r'\bмск\b',
     r'\bлобня\b', r'\bлобне\b', r'\bлобню\b',
@@ -44,42 +43,45 @@ MOSCOW_MO_PATTERNS = [
     r'\bподмосковье\b', r'\bподмосковья\b'
 ]
 
-# 2. Исключаем только далекие регионы (Урал, Сибирь, Юг, Дальний Восток)
-FAR_REGIONS_PATTERNS = [
-    r'\bекатеринбург\b', r'\bновосибирск\b', r'\bкрасноярск\b',
-    r'\bчелябинск\b', r'\bомск\b', r'\bуфа\b', r'\bпермь\b',
-    r'\bтюмень\b', r'\bбарнаул\b', r'\bиркутск\b', r'\bвладивосток\b',
-    r'\bхабаровск\b', r'\bкраснодар\b', r'\bсочи\b', r'\bростов\b',
-    r'\bволгоград\b', r'\bставрополь\b', r'\bастрахань\b'
+# Строго запрещенные другие города (чтобы не пролетали Самара, Нижний Новгород и т.д.)
+EXCLUDE_CITIES_PATTERNS = [
+    r'\bнижний новгород\b', r'\bсамара\b', r'\bсимферополь\b', r'\bчебоксары\b',
+    r'\bказань\b', r'\bекатеринбург\b', r'\bновосибирск\b', r'\bкраснодар\b',
+    r'\bсочи\b', r'\bростов\b', r'\bуфа\b', r'\bпермь\b', r'\bчелябинск\b',
+    r'\bомск\b', r'\bвладивосток\b', r'\bхабаровск\b', r'\bворонеж\b'
 ]
 
-# 3. Обязательные ключевые слова танцевальных баттлов
+# Обязательные ключевые слова баттлов
 BATTLE_PATTERNS = [
     r'\bбатл\b', r'\bбаттл\b', r'\bбатлы\b', r'\bбаттлы\b', 
-    r'\bbattle\b', r'\battles\b', r'\bконтест\b', r'\bcontest\b'
+    r'\bbattle\b', r'\battles\b'
 ]
 
-# 4. Мусорные темы и нецелевые мероприятия
+# Мусор (караоке, вокал, реклама тренеров, наборы, розыгрыши)
 JUNK_PATTERNS = [
+    r'караоке', r'вокал', r'пение', r'рэп', r'rap battle', r'mc battle',
     r'открыт набор', r'набор в группу', r'занятия в студии',
-    r'аренда зала', r'аренда студии', r'эстетичный зал',
+    r'аренда зала', r'аренда студии', r'розыгрыш', r'наш тренер',
     r'дискотека', r'кавер', r'k-pop', r'к-поп', r'cover dance',
-    r'рэп', r'вокал', r'пение', r'rap battle', r'mc battle', r'битбокс',
-    r'продам', r'куплю', r'вакансия', r'работа', r'фотограф', r'визажист', r'маникюр'
+    r'продам', r'куплю', r'вакансия', r'работа', r'фотограф', r'визажист'
 ]
 
 def is_valid_battle_post(text):
     text_lower = text.lower()
 
-    # 1. Проверяем наличие танцевального/баттлового контекста
+    # 1. Должно быть слово "баттл" / "батл"
     if not any(re.search(p, text_lower) for p in BATTLE_PATTERNS):
         return False
 
-    # 2. Отсекаем далекие регионы (Урал, Юг, Сибирь)
-    if any(re.search(p, text_lower) for p in FAR_REGIONS_PATTERNS):
+    # 2. Строго должна упоминаться Москва или МО
+    if not any(re.search(p, text_lower) for p in MOSCOW_MO_PATTERNS):
         return False
 
-    # 3. Отсекаем коммерческий мусор, рэп и K-Pop
+    # 3. Не должно быть других городов из черного списка
+    if any(re.search(p, text_lower) for p in EXCLUDE_CITIES_PATTERNS):
+        return False
+
+    # 4. Отсекаем мусор (караоке, наборы, тренеров и т.д.)
     if any(re.search(p, text_lower) for p in JUNK_PATTERNS):
         return False
 
@@ -92,28 +94,28 @@ def start_message(message):
     markup.add(telebot.types.KeyboardButton("🔍 Найти баттлы"))
     bot.send_message(
         message.chat.id, 
-        "Привет! Я бот для поиска танцевальных баттлов (Hip-Hop, All Styles) по Москве, МО и Центральной России. Нажми кнопку ниже.", 
+        "Привет! Я бот для поиска танцевальных баттлов строго по Москве и МО. Нажми кнопку ниже.", 
         reply_markup=markup
     )
 
 @bot.message_handler(func=lambda message: message.text == "🔍 Найти баттлы")
 def search_battles(message):
-    bot.send_message(message.chat.id, "Выполняю сканирование ВКонтакте...")
+    bot.send_message(message.chat.id, "Ищу актуальные танцевальные баттлы в Москве и МО...")
     
     try:
         vk_session = vk_api.VkApi(token=VK_TOKEN)
         vk = vk_session.get_api()
         
-        # Точечные поисковые запросы
+        # Запросы с явным указанием Москвы и МО в поисковой выдаче ВК
         queries = [
-            "танцевальный баттл OR танцевальный батл OR dance battle",
-            "hip hop battle OR all styles battle OR хип хоп баттл",
-            "лобня баттл OR троицк баттл OR лыткарино баттл"
+            "москва танцевальный баттл OR москва баттл",
+            "мск баттл OR химки баттл OR лобня баттл",
+            "all styles battle москва OR hip hop battle москва"
         ]
         
         raw_items = []
         for q in queries:
-            res = vk.newsfeed.search(q=q, count=200)
+            res = vk.newsfeed.search(q=q, count=150)
             raw_items.extend(res.get('items', []))
             
         found_battles = []
@@ -137,10 +139,10 @@ def search_battles(message):
                 found_battles.append(f"🔥 {preview}\n\n🔗 Ссылка: {link}")
         
         if found_battles:
-            for battle in found_battles[:15]:
+            for battle in found_battles[:10]:
                 bot.send_message(message.chat.id, battle)
         else:
-            bot.send_message(message.chat.id, "Подходящих танцевальных баттлов пока не найдено.")
+            bot.send_message(message.chat.id, "Пока что новых баттлов по Москве и МО не нашлось. Попробуйте позже!")
             
     except Exception as e:
         bot.send_message(message.chat.id, f"Ошибка при сканировании: {e}")
