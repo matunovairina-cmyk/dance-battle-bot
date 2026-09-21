@@ -1,185 +1,226 @@
 import os
 import re
+import time
 import threading
+from datetime import datetime, timedelta
 import telebot
 import vk_api
 from flask import Flask
 
 # === НАСТРОЙКИ ТОКЕНОВ ===
-TELEGRAM_TOKEN = "8311376717:AAEftfCMxf_GdMIf8h7gcFBV0RAvraMuSQw"
-VK_TOKEN = "bd024558bd024558bd02455812be41a353bbd02bd024558d7adb85384607e6310595f8c"
+TELEGRAM_TOKEN = '8311376717:AAEftfCMxf_GdMIf8h7gcFBV0RAvraMuSQw'
+VK_TOKEN = 'bd024558bd024558bd02455812be41a353bbd02bd024558d7adb85384607e6310595f8c'
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 app = Flask(__name__)
 
-# === СЕРВЕР ДЛЯ RENDER ===
 @app.route("/")
 def home():
     return "Сервер работает, бот активен!"
 
-# === СТРОГИЕ ФИЛЬТРЫ ===
-
-# Разрешенные локации (Москва, МО, Лобня, Троицк, Лыткарино)
-MOSCOW_MO_PATTERNS = [
-    r'\bмосква\b', r'\bмоскве\b', r'\bмоскву\b', r'\bмск\b',
-    r'\bлобня\b', r'\bлобне\b', r'\bлобню\b',
-    r'\bтроицк\b', r'\bтроицке\b',
-    r'\bлыткарино\b',
-    r'\bхимки\b', r'\bхимках\b',
-    r'\bмытищи\b', r'\bмытищах\b',
-    r'\bкоролев\b', r'\bкоролёв\b', r'\bкоролеве\b', r'\bкоролёве\b',
-    r'\bподольск\b', r'\bподольске\b',
-    r'\bкрасногорск\b', r'\bкрасногорске\b',
-    r'\bлюберцы\b', r'\bлюберцах\b',
-    r'\bбалашиха\b', r'\bбалашихе\b',
-    r'\bдолгопрудный\b', r'\bдолгопрудном\b',
-    r'\bзеленоград\b', r'\bзеленограде\b',
-    r'\bподмосковье\b', r'\bподмосковья\b'
+# === ВАШИ ОРИГИНАЛЬНЫЕ НАСТРОЙКИ ===
+SEARCH_QUERIES = [
+    "баттл хип-хоп", "battle hip-hop", "баттл hip-hop",
+    "баттл all styles", "баттл allstyles", "танцевальный баттл", 
+    "dance battle", "танцевальные баттлы", "хип хоп баттл"
 ]
 
-# Черный список других городов (исправлен синтаксис \b)
-EXCLUDE_CITIES_PATTERNS = [
-    r'\bнижний новгород\b', r'\bсамара\b', r'\bсимферополь\b', r'\bчебоксары\b',
-    r'\bказань\b', r'\bекатеринбург\b', r'\bновосибирск\b', r'\bкраснодар\b',
-    r'\bсочи\b', r'\bростов\b', r'\bуфа\b', r'\bпермь\b', r'\bчелябинск\b',
-    r'\bомск\b', r'\bвладивосток\b', r'\bхабаровск\b', r'\bворонеж\b',
-    r'\bновошахтинск\b', r'\bтихорецк\b', r'\bтихорецке\b', r'\bтверь\b', r'\bтула\b'
+LOCAL_STUDIOS_MO = [
+    'kidsinballet', 'impulse_mytishchi', 'himki_dance', 'balashikha_dance_life',
+    'podolsk_dance_hall', 'korolev_dance', 'odintsovo_dance_club', 'krg_dance',
+    'lubertsy_hiphop', 'serpuhov_dance', 'kolomna_dance_events', 'dolgoprudny_dance',
+    'pushkin_dancers', 'schelkovo_dance', 'zhukovskiy_dance'
 ]
 
-# Исключаем контекст, где Москва упоминается лишь как родина участника/судьи
-ORIGIN_MOSCOW_PATTERNS = [
-    r'из\s+(г\.\s*)?москв', r'педагог\s+из\s+москв', r'гость\s+из\0москв',
-    r'судья\s+из\s+москв', r'приедет\s+из\s+москв', r'г\.\s*москва\)'
+TARGET_MONTHS_STRICT = [
+    r'\b(?:[1-9]|[12]\d|3[01])\s*(?:январ|феврал|март|апрел|ма[яей]|октябр|ноябр|декабр)',
+    r'\b(?:в|на)\s+(?:январ|феврал|март|апрел|ма[яей]|октябр|ноябр|декабр)',
+    r'\b(?:января|февраля|марта|апреля|мая|октября|ноября|декабря)\b'
 ]
 
-# Обязательные ключевые слова анонса баттла
-BATTLE_PATTERNS = [
-    r'\bбатл\b', r'\bбаттл\b', r'\bбатлы\b', r'\bбаттлы\b', 
-    r'\bbattle\b', r'\battles\b'
+MO_CITIES = [
+    'лобн', 'мытищ', 'химк', 'балаших', 'подольск', 'королев', 'королёв',
+    'одинцов', 'красногорск', 'люберц', 'серпухов', 'коломн', 'дольгопрудн',
+    'пушкин', 'щелков', 'жуковск', 'реутов', 'сергиев посад',
+    'раменск', 'истр', 'дубн', 'электросталь', 'железнодорожн',
+    'подмосковь', 'московской област'
 ]
 
-# Прошедшие события, результаты и победы
-PAST_EVENTS_PATTERNS = [
-    r'вошел в', r'вошла в', r'занял', r'заняла', r'победитель', r'победил',
-    r'победила', r'место', r'результаты', r'итоги', r'диплом', r'кубок',
-    r'поздравляем', r'гордимся', r'состоялся', r'состоялось', r'прошел баттл',
-    r'прошел батл', r'прошли баттлы', r'вспомним', r'как это было'
+FOREIGN_REGIONS = [
+    'уфа', 'башкортостан', 'симферополь', 'крым', 'красноярск', 
+    'самар', 'тверь', 'минусинск', 'тихорецк', 'казань', 'екатеринбург',
+    'новосибирск', 'нижний новгород', 'санкт-петербург', 'спб', 'питер', 
+    'новочебоксарск', 'пр-кт октября', 'проспект октября'
 ]
 
-# Интенсивы, мастер-классы и мусор без баттлов
-JUNK_PATTERNS = [
-    # Брейк-данс
-    r'брейк', r'брейкинг', r'breakdance', r'breaking', r'bboy', r'bgirl',
-    # Обучение и мастер-классы
-    r'интенсив', r'мастер-класс', r'мастер класс', r'воркшоп', r'лаборатор',
-    r'представляем педагогов', r'представляем экспертов', r'набор в группу',
-    r'занятия в студии', r'открыт набор',
-    # Разное
-    r'караоке', r'вокал', r'пение', r'рэп', r'кавказск', r'тодес', r'k-pop',
-    r'аренда зала', r'розыгрыш', r'скидка', r'абонемент', r'вакансия', r'работа'
-]
-
-def get_text_snippet(text):
-    """Создает очищенный фрагмент текста для предотвращения дубликатов спама"""
-    cleaned = re.sub(r'\W+', '', text.lower())
-    return cleaned[:80]
-
-def is_valid_battle_post(text):
+# === ВАШИ ОРИГИНАЛЬНЫЕ ФУНКЦИИ ФИЛЬТРАЦИИ ===
+def is_valid_event(text, group_city):
     text_lower = text.lower()
-
-    # 1. Наличие слова "баттл"
-    if not any(re.search(p, text_lower) for p in BATTLE_PATTERNS):
+    
+    if 'рэп' in text_lower or 'rap' in text_lower or 'fan bingbing' in text_lower:
+        return False
+    if any(region in text_lower for region in FOREIGN_REGIONS):
+        return False
+        
+    if not any(re.search(m, text_lower) for m in TARGET_MONTHS_STRICT):
+        return False
+        
+    has_battle = any(word in text_lower for word in ['баттл', 'battle', 'джем', 'jam', 'контест', 'contest'])
+    if not has_battle:
         return False
 
-    # 2. Исключаем прошлые результаты и отчеты о победах
-    if any(re.search(p, text_lower) for p in PAST_EVENTS_PATTERNS):
+    has_dance = any(word in text_lower for word in ['hip-hop', 'хип-хоп', 'all styles', 'allstyles', 'брейкинг', 'breaking', 'house', 'locking', 'popping', 'танец', 'танцор'])
+    if not has_dance:
         return False
 
-    # 3. Исключаем мастер-классы, брейк-данс и рекламу
-    if any(re.search(p, text_lower) for p in JUNK_PATTERNS):
-        return False
+    text_for_loc = re.sub(r'(г\.\s*москва|г\.москва|из\s+москвы)', '', text_lower)
+    
+    loc_in_text = any(loc in text_for_loc for loc in ['москв', 'мск'] + MO_CITIES)
+    loc_in_profile = any(city in group_city for city in ['москва'] + MO_CITIES)
+    
+    return loc_in_text or loc_in_profile
 
-    # 4. Исключаем другие города
-    if any(re.search(p, text_lower) for p in EXCLUDE_CITIES_PATTERNS):
-        return False
+def get_word_fingerprint(text):
+    words = re.findall(r'[а-яa-z]{4,}', text.lower())
+    return set(words[:25])
 
-    # 5. Проверяем, что Москва/МО не указаны просто как город происхождения педагога
-    if any(re.search(p, text_lower) for p in ORIGIN_MOSCOW_PATTERNS):
-        # Если при этом нет прямого указания на проведение в Москве
-        if not re.search(r'пройдет в москве|место проведения:?\s*москва|г\.\s*москва,', text_lower):
-            return False
+# === ГЛАВНАЯ ФУНКЦИЯ ПОИСКА (АДАПТИРОВАНА ДЛЯ БОТА) ===
+def run_search():
+    try:
+        vk_session = vk_api.VkApi(token=VK_TOKEN)
+        vk = vk_session.get_api()
+    except Exception as e:
+        return None, f"Ошибка авторизации ВК. Проверьте токен: {e}"
 
-    # 6. Обязательное наличие Москвы или Подмосковья
-    if not any(re.search(p, text_lower) for p in MOSCOW_MO_PATTERNS):
-        return False
+    found_posts = []
+    seen_urls = set()
+    seen_group_ids = set() 
+    seen_fingerprints = [] 
+    
+    start_time = int((datetime.now() - timedelta(days=25)).timestamp())
 
-    return True
+    for query in SEARCH_QUERIES:
+        try:
+            response = vk.newsfeed.search(
+                q=query, count=100, start_time=start_time, extended=1, fields='city'
+            )
+            
+            groups_cities = {g['id']: g.get('city', {}).get('title', '').lower() for g in response.get('groups', [])}
 
-# === ЛОГИКА БОТА ===
+            for item in response.get('items', []):
+                if item.get('owner_id', 0) >= 0:
+                    continue
+                    
+                group_id = abs(item['owner_id'])
+                
+                if group_id in seen_group_ids:
+                    continue
+
+                post_url = f"https://vk.com/wall{item['owner_id']}_{item['id']}"
+                if post_url in seen_urls: 
+                    continue
+                
+                text = item.get('text', '')
+                
+                post_fingerprint = get_word_fingerprint(text)
+                is_duplicate = False
+                for seen_fp in seen_fingerprints:
+                    if len(post_fingerprint & seen_fp) >= 10:
+                        is_duplicate = True
+                        break
+                
+                if is_duplicate:
+                    continue
+
+                group_city = groups_cities.get(group_id, "")
+
+                if is_valid_event(text, group_city):
+                    date_posted = datetime.fromtimestamp(item['date']).strftime('%d.%m.%Y')
+                    found_posts.append({
+                        'date': date_posted, 
+                        'url': post_url, 
+                        'text': text[:300] + "..."
+                    })
+                    seen_urls.add(post_url)
+                    seen_group_ids.add(group_id)
+                    seen_fingerprints.append(post_fingerprint)
+                    
+            time.sleep(0.4)
+        except Exception:
+            pass
+
+    for group in LOCAL_STUDIOS_MO:
+        try:
+            response = vk.wall.get(domain=group, count=25)
+            for item in response.get('items', []):
+                group_id = abs(item['owner_id'])
+                if group_id in seen_group_ids:
+                    continue
+
+                post_url = f"https://vk.com/wall{item['owner_id']}_{item['id']}"
+                if post_url in seen_urls: 
+                    continue
+                
+                text = item.get('text', '')
+                
+                post_fingerprint = get_word_fingerprint(text)
+                is_duplicate = False
+                for seen_fp in seen_fingerprints:
+                    if len(post_fingerprint & seen_fp) >= 10:
+                        is_duplicate = True
+                        break
+                if is_duplicate:
+                    continue
+
+                if any(re.search(m, text.lower()) for m in TARGET_MONTHS_STRICT) and any(w in text.lower() for w in ['баттл', 'battle']):
+                    date_posted = datetime.fromtimestamp(item['date']).strftime('%d.%m.%Y')
+                    found_posts.append({
+                        'date': date_posted, 
+                        'url': post_url, 
+                        'text': text[:300] + "..."
+                    })
+                    seen_urls.add(post_url)
+                    seen_group_ids.add(group_id)
+                    seen_fingerprints.append(post_fingerprint)
+            time.sleep(0.4)
+        except Exception:
+            pass
+
+    return found_posts, None
+
+
+# === ИНТЕРФЕЙС ТЕЛЕГРАМ БОТА ===
 @bot.message_handler(commands=['start'])
 def start_message(message):
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add(telebot.types.KeyboardButton("🔍 Найти баттлы"))
     bot.send_message(
         message.chat.id, 
-        "Привет! Ищу Hip-Hop и All Styles баттлы (Москва и МО). Нажми кнопку ниже.", 
+        "Привет! Я готов искать баттлы по твоему алгоритму. Жми кнопку ниже.", 
         reply_markup=markup
     )
 
 @bot.message_handler(func=lambda message: message.text == "🔍 Найти баттлы")
 def search_battles(message):
-    bot.send_message(message.chat.id, "Сканирую актуальные анонсы баттлов в Москве и МО...")
+    # Предупреждаем, что оригинальный алгоритм требует времени
+    bot.send_message(message.chat.id, "⏳ Запускаю глубокий поиск... Это займет примерно 10-15 секунд, алгоритм тщательно фильтрует ленту.")
     
-    try:
-        vk_session = vk_api.VkApi(token=VK_TOKEN)
-        vk = vk_session.get_api()
+    posts, error = run_search()
+    
+    if error:
+        bot.send_message(message.chat.id, error)
+        return
         
-        # Запросы нацелены строго на анонсы мероприятий
-        queries = [
-            "москва танцевальный баттл анонс OR регистрация",
-            "москва hip hop battle OR all styles battle",
-            "лобня баттл OR троицк баттл OR лыткарино баттл"
-        ]
-        
-        raw_items = []
-        for q in queries:
-            res = vk.newsfeed.search(q=q, count=200)
-            raw_items.extend(res.get('items', []))
-            
-        found_battles = []
-        seen_links = set()
-        seen_texts = set()
-        
-        for item in raw_items:
-            text = item.get('text', '')
-            if not text:
-                continue
-                
-            owner_id = item.get('owner_id')
-            post_id = item.get('id')
-            link = f"https://vk.com/wall{owner_id}_{post_id}"
-            
-            # Проверка дубликатов по ссылке и по содержанию текста
-            text_snippet = get_text_snippet(text)
-            if link in seen_links or text_snippet in seen_texts:
-                continue
-                
-            if is_valid_battle_post(text):
-                seen_links.add(link)
-                seen_texts.add(text_snippet)
-                preview = text[:250].replace('\n', ' ') + "..."
-                found_battles.append(f"🔥 {preview}\n\n🔗 Ссылка: {link}")
-        
-        if found_battles:
-            for battle in found_battles[:10]:
-                bot.send_message(message.chat.id, battle)
-        else:
-            bot.send_message(message.chat.id, "На ближайшее время актуальных баттлов в Москве и МО не найдено.")
-            
-    except Exception as e:
-        bot.send_message(message.chat.id, f"Ошибка при сканировании: {e}")
+    if posts:
+        bot.send_message(message.chat.id, f"🎯 ИДЕАЛЬНО ЧИСТАЯ ВЫДАЧА (Мск и МО): {len(posts)}")
+        for idx, post in enumerate(posts, 1):
+            msg = f"🔥 Баттл #{idx}\n📅 Опубликовано: {post['date']}\n🔗 Ссылка: {post['url']}\n\n📝 Текст: {post['text']}"
+            bot.send_message(message.chat.id, msg)
+            time.sleep(0.3) # Пауза, чтобы Телеграм не заблокировал бота за спам сообщениями
+    else:
+        bot.send_message(message.chat.id, "Подходящих уникальных анонсов не найдено.")
 
-# === ЗАПУСК В ОБЛАКЕ RENDER ===
+# === ЗАПУСК СЕРВЕРА ДЛЯ RENDER ===
 def run_telegram_bot():
     try:
         bot.remove_webhook()
@@ -188,12 +229,11 @@ def run_telegram_bot():
     bot.infinity_polling(none_stop=True)
 
 if __name__ == "__main__":
+    # Запускаем бота в отдельном потоке
     bot_thread = threading.Thread(target=run_telegram_bot)
     bot_thread.daemon = True
     bot_thread.start()
     
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
-    
+    # Запускаем Flask на основном потоке, чтобы Render видел, что приложение работает
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
