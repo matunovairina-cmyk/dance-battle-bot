@@ -33,64 +33,84 @@ MOSCOW_MO_PATTERNS = [
     r'\bлюберцы\b', r'\bлюберцах\b',
     r'\bбалашиха\b', r'\bбалашихе\b',
     r'\bдолгопрудный\b', r'\bдолгопрудном\b',
-    r'\bодинцово\b',
-    r'\bщёлково\b', r'\bщелково\b',
-    r'\bраменское\b',
-    r'\bэлектросталь\b',
-    r'\bжуковский\b',
-    r'\bпушкино\b',
     r'\bзеленоград\b', r'\bзеленограде\b',
     r'\bподмосковье\b', r'\bподмосковья\b'
 ]
 
-# Черный список других городов, чтобы исключить регионы
+# Черный список других городов (исправлен синтаксис \b)
 EXCLUDE_CITIES_PATTERNS = [
-    r'\бнижний новгород\b', r'\бсамара\b', r'\бсимферополь\b', r'\бчебоксары\b',
-    r'\бказань\b', r'\бекатеринбург\b', r'\бновосибирск\b', r'\бкраснодар\b',
-    r'\бсочи\b', r'\бростов\b', r'\буфа\b', r'\бпермь\b', r'\бчелябинск\b',
-    r'\бомск\b', r'\бвладивосток\b', r'\бхабаровск\b', r'\бворонеж\b',
-    r'\бновошахтинск\b'
+    r'\bнижний новгород\b', r'\bсамара\b', r'\bсимферополь\b', r'\bчебоксары\b',
+    r'\bказань\b', r'\bекатеринбург\b', r'\bновосибирск\b', r'\bкраснодар\b',
+    r'\bсочи\b', r'\bростов\b', r'\bуфа\b', r'\bпермь\b', r'\bчелябинск\b',
+    r'\bомск\b', r'\bвладивосток\b', r'\bхабаровск\b', r'\bворонеж\b',
+    r'\bновошахтинск\b', r'\bтихорецк\b', r'\bтихорецке\b', r'\bтверь\b', r'\bтула\b'
 ]
 
-# Обязательные слова (ищем именно баттлы)
+# Исключаем контекст, где Москва упоминается лишь как родина участника/судьи
+ORIGIN_MOSCOW_PATTERNS = [
+    r'из\s+(г\.\s*)?москв', r'педагог\s+из\s+москв', r'гость\s+из\0москв',
+    r'судья\s+из\s+москв', r'приедет\s+из\s+москв', r'г\.\s*москва\)'
+]
+
+# Обязательные ключевые слова анонса баттла
 BATTLE_PATTERNS = [
     r'\bбатл\b', r'\bбаттл\b', r'\bбатлы\b', r'\bбаттлы\b', 
     r'\bbattle\b', r'\battles\b'
 ]
 
-# ЖЕСТКИЙ МУСОР (Брейк-данс, расписания, новости, наборы, реклама)
-JUNK_PATTERNS = [
-    # Брейк-данс (удаляем полностью по вашему требованию)
-    r'брейк', r'брейкинг', r'breakdance', r'breaking', r'bboy', r'bgirl',
-    # Расписания и общие анонсы
-    r'расписание', r'планируйте', r'день рождения', r'итоги', r'поздравляем',
-    # Обучение и реклама студий
-    r'открыт набор', r'набор в группу', r'занятия в студии', r'наш тренер',
-    r'аренда зала', r'аренда студии', r'розыгрыш', r'скидка', r'абонемент',
-    # Другие танцевальные стили и направления
-    r'дискотека', r'кавер', r'k-pop', r'к-поп', r'cover dance',
-    r'рэп', r'вокал', r'пение', r'кавказск', r'тодес',
-    # Разное
-    r'продам', r'куплю', r'вакансия', r'работа', r'фотограф', r'визажист'
+# Прошедшие события, результаты и победы
+PAST_EVENTS_PATTERNS = [
+    r'вошел в', r'вошла в', r'занял', r'заняла', r'победитель', r'победил',
+    r'победила', r'место', r'результаты', r'итоги', r'диплом', r'кубок',
+    r'поздравляем', r'гордимся', r'состоялся', r'состоялось', r'прошел баттл',
+    r'прошел батл', r'прошли баттлы', r'вспомним', r'как это было'
 ]
+
+# Интенсивы, мастер-классы и мусор без баттлов
+JUNK_PATTERNS = [
+    # Брейк-данс
+    r'брейк', r'брейкинг', r'breakdance', r'breaking', r'bboy', r'bgirl',
+    # Обучение и мастер-классы
+    r'интенсив', r'мастер-класс', r'мастер класс', r'воркшоп', r'лаборатор',
+    r'представляем педагогов', r'представляем экспертов', r'набор в группу',
+    r'занятия в студии', r'открыт набор',
+    # Разное
+    r'караоке', r'вокал', r'пение', r'рэп', r'кавказск', r'тодес', r'k-pop',
+    r'аренда зала', r'розыгрыш', r'скидка', r'абонемент', r'вакансия', r'работа'
+]
+
+def get_text_snippet(text):
+    """Создает очищенный фрагмент текста для предотвращения дубликатов спама"""
+    cleaned = re.sub(r'\W+', '', text.lower())
+    return cleaned[:80]
 
 def is_valid_battle_post(text):
     text_lower = text.lower()
 
-    # 1. Должно быть слово баттл/батл
+    # 1. Наличие слова "баттл"
     if not any(re.search(p, text_lower) for p in BATTLE_PATTERNS):
         return False
 
-    # 2. Строго Москва или МО (включая Лобню)
-    if not any(re.search(p, text_lower) for p in MOSCOW_MO_PATTERNS):
+    # 2. Исключаем прошлые результаты и отчеты о победах
+    if any(re.search(p, text_lower) for p in PAST_EVENTS_PATTERNS):
         return False
 
-    # 3. Никаких других городов
+    # 3. Исключаем мастер-классы, брейк-данс и рекламу
+    if any(re.search(p, text_lower) for p in JUNK_PATTERNS):
+        return False
+
+    # 4. Исключаем другие города
     if any(re.search(p, text_lower) for p in EXCLUDE_CITIES_PATTERNS):
         return False
 
-    # 4. Отсекаем брейк-данс, расписания, наборы и мусор
-    if any(re.search(p, text_lower) for p in JUNK_PATTERNS):
+    # 5. Проверяем, что Москва/МО не указаны просто как город происхождения педагога
+    if any(re.search(p, text_lower) for p in ORIGIN_MOSCOW_PATTERNS):
+        # Если при этом нет прямого указания на проведение в Москве
+        if not re.search(r'пройдет в москве|место проведения:?\s*москва|г\.\s*москва,', text_lower):
+            return False
+
+    # 6. Обязательное наличие Москвы или Подмосковья
+    if not any(re.search(p, text_lower) for p in MOSCOW_MO_PATTERNS):
         return False
 
     return True
@@ -102,23 +122,23 @@ def start_message(message):
     markup.add(telebot.types.KeyboardButton("🔍 Найти баттлы"))
     bot.send_message(
         message.chat.id, 
-        "Привет! Ищу Hip-Hop и All Styles баттлы строго в Москве и МО (без брейк-данса и мусора). Нажми кнопку ниже.", 
+        "Привет! Ищу Hip-Hop и All Styles баттлы (Москва и МО). Нажми кнопку ниже.", 
         reply_markup=markup
     )
 
 @bot.message_handler(func=lambda message: message.text == "🔍 Найти баттлы")
 def search_battles(message):
-    bot.send_message(message.chat.id, "Фильтрую анонсы баттлов (Москва и МО)...")
+    bot.send_message(message.chat.id, "Сканирую актуальные анонсы баттлов в Москве и МО...")
     
     try:
         vk_session = vk_api.VkApi(token=VK_TOKEN)
         vk = vk_session.get_api()
         
-        # Точечные поисковые запросы
+        # Запросы нацелены строго на анонсы мероприятий
         queries = [
-            "москва танцевальный баттл",
-            "москва hip hop battle OR москва all styles battle",
-            "лобня баттл OR москва баттл танцы"
+            "москва танцевальный баттл анонс OR регистрация",
+            "москва hip hop battle OR all styles battle",
+            "лобня баттл OR троицк баттл OR лыткарино баттл"
         ]
         
         raw_items = []
@@ -128,6 +148,7 @@ def search_battles(message):
             
         found_battles = []
         seen_links = set()
+        seen_texts = set()
         
         for item in raw_items:
             text = item.get('text', '')
@@ -138,11 +159,14 @@ def search_battles(message):
             post_id = item.get('id')
             link = f"https://vk.com/wall{owner_id}_{post_id}"
             
-            if link in seen_links:
+            # Проверка дубликатов по ссылке и по содержанию текста
+            text_snippet = get_text_snippet(text)
+            if link in seen_links or text_snippet in seen_texts:
                 continue
                 
             if is_valid_battle_post(text):
                 seen_links.add(link)
+                seen_texts.add(text_snippet)
                 preview = text[:250].replace('\n', ' ') + "..."
                 found_battles.append(f"🔥 {preview}\n\n🔗 Ссылка: {link}")
         
@@ -150,7 +174,7 @@ def search_battles(message):
             for battle in found_battles[:10]:
                 bot.send_message(message.chat.id, battle)
         else:
-            bot.send_message(message.chat.id, "Пока что подходящих баттлов по вашим критериям не найдено.")
+            bot.send_message(message.chat.id, "На ближайшее время актуальных баттлов в Москве и МО не найдено.")
             
     except Exception as e:
         bot.send_message(message.chat.id, f"Ошибка при сканировании: {e}")
@@ -167,6 +191,9 @@ if __name__ == "__main__":
     bot_thread = threading.Thread(target=run_telegram_bot)
     bot_thread.daemon = True
     bot_thread.start()
+    
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
     
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
