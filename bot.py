@@ -6,8 +6,8 @@ from flask import Flask
 
 # === НАСТРОЙКИ ТОКЕНОВ ===
 # Вставьте сюда ваши настоящие токены внутри кавычек
-TELEGRAM_TOKEN = "ВАШ_ТОКЕН_ТЕЛЕГРАМ"
-VK_TOKEN = "ВАШ_ТОКЕН_ВК"
+TELEGRAM_TOKEN = "8311376717:AAEftfCMxf_GdMIf8h7gcFBV0RAvraMuSQw"
+VK_TOKEN = "bd024558bd024558bd02455812be41a353bbd02bd024558d7adb85384607e6310595f8c"
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 app = Flask(__name__)
