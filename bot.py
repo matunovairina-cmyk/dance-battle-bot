@@ -28,15 +28,15 @@ def start_message(message):
 
 @bot.message_handler(func=lambda message: message.text == "🔍 Найти баттлы")
 def search_battles(message):
-    bot.send_message(message.chat.id, "Сканирую ВКонтакте, подождите пару секунд...")
+    bot.send_message(message.chat.id, "Сканирую ВКонтакте (ищу до 200 свежих постов)...")
     
     try:
         # Авторизация ВК
         vk_session = vk_api.VkApi(token=VK_TOKEN)
         vk = vk_session.get_api()
         
-        # Поиск по ВК (newsfeed.search)
-        response = vk.newsfeed.search(q="танцевальный баттл OR hip hop battle OR all styles battle", count=20)
+        # Поиск по ВК (увеличили сканирование до 200 постов!)
+        response = vk.newsfeed.search(q="танцевальный баттл OR hip hop battle OR all styles battle", count=200)
         items = response.get('items', [])
         found_battles = []
         
@@ -57,10 +57,12 @@ def search_battles(message):
                 preview = item.get('text', '')[:250].replace('\n', ' ') + "..."
                 found_battles.append(f"🔥 {preview}\n\n🔗 Ссылка: {link}")
         
-        # Дедупликация и отправка
+        # Дедупликация
         found_battles = list(set(found_battles))
+        
         if found_battles:
-            for battle in found_battles[:5]: # Отправляем топ-5, чтобы не спамить
+            # Отправляем все найденные баттлы (до 15 штук за раз)
+            for battle in found_battles[:15]:
                 bot.send_message(message.chat.id, battle)
         else:
             bot.send_message(message.chat.id, "К сожалению, сейчас в МО подходящих баттлов не найдено.")
@@ -71,7 +73,6 @@ def search_battles(message):
 # === ФОНОВЫЙ ЗАПУСК (чтобы избежать ошибки 409 Conflict) ===
 def run_telegram_bot():
     try:
-        # Сбрасываем старые подключения
         bot.remove_webhook()
     except Exception:
         pass
