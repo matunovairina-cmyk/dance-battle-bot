@@ -5,19 +5,18 @@ import vk_api
 from flask import Flask
 
 # === НАСТРОЙКИ ТОКЕНОВ ===
-# Вставьте сюда ваши настоящие токены внутри кавычек
 TELEGRAM_TOKEN = "8311376717:AAEftfCMxf_GdMIf8h7gcFBV0RAvraMuSQw"
 VK_TOKEN = "bd024558bd024558bd02455812be41a353bbd02bd024558d7adb85384607e6310595f8c"
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 app = Flask(__name__)
 
-# === СЕРВЕР ДЛЯ RENDER (держит порт открытым 24/7) ===
+# === СЕРВЕР ДЛЯ RENDER ===
 @app.route("/")
 def home():
-    return "Бот работает в облаке!"
+    return "Сервер работает, бот активен!"
 
-# === ТОЧНАЯ ЛОГИКА ПОИСКА ===
+# === ЛОГИКА БОТА ===
 @bot.message_handler(commands=['start'])
 def start_message(message):
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -30,57 +29,63 @@ def start_message(message):
 
 @bot.message_handler(func=lambda message: message.text == "🔍 Найти баттлы")
 def search_battles(message):
-    bot.send_message(message.chat.id, "Сканирую ВКонтакте по расширенным фильтрам...")
+    bot.send_message(message.chat.id, "Глубокое сканирование ВКонтакте (проверяю до 400 свежих постов)...")
     
     try:
         vk_session = vk_api.VkApi(token=VK_TOKEN)
         vk = vk_session.get_api()
         
-        # Точный поисковый запрос по ВК (сканирует до 200 свежих постов)
-        query = "танцевальный баттл OR танцевальный батл OR hip hop battle OR all styles OR dance battle"
-        response = vk.newsfeed.search(q=query, count=200)
-        items = response.get('items', [])
+        # Делаем 2 отдельных запроса, чтобы забрать 400 постов вместо 200
+        items = []
+        q1 = "танцевальный баттл OR танцевальный батл OR dance battle"
+        q2 = "hip hop battle OR all styles battle OR хип хоп баттл"
+        
+        res1 = vk.newsfeed.search(q=q1, count=200)
+        res2 = vk.newsfeed.search(q=q2, count=200)
+        
+        items.extend(res1.get('items', []))
+        items.extend(res2.get('items', []))
+        
         found_battles = []
         
-        # Расширенный список городов Москвы и МО (включая Лобню)
+        # Города, регионы и популярные сокращения
         mo_cities = [
-            'москва', 'мытищи', 'королёв', 'королев', 'раменское', 'люберцы', 
+            'москва', 'мск', 'мытищи', 'королёв', 'королев', 'раменское', 'люберцы', 
             'подольск', 'лобня', 'долгопрудный', 'химки', 'балашиха', 'красногорск', 
-            'одинцово', 'щёлково', 'щелково', 'электросталь', 'жуковский', 'пушкино'
+            'одинцово', 'щёлково', 'щелково', 'электросталь', 'жуковский', 'пушкино',
+            'подмосковье', 'мо'
         ]
         
-        # Исключение нецелевых тем
+        # Стоп-слова (исключаем рэп, вокал и коммерческий спам)
         bad_words = [
             'рэп', 'вокал', 'пение', 'rap battle', 'mc battle', 'рэп-баттл', 'рэп батл',
-            'битбокс', 'beatbox', 'стихи', 'поэт', 'кулинар', 'маникюр', 'продам', 
-            'куплю', 'аренда', 'вакансия', 'работа', 'фотограф', 'визажист', 'скидка'
-        ]
-        
-        # Обязательный танцевальный контекст
-        dance_words = [
-            'танец', 'танцы', 'танцевальный', 'hip-hop', 'hip hop', 'all styles', 
-            'break', 'popping', 'house', 'dancer', 'батл', 'баттл'
+            'битбокс', 'стихи', 'поэт', 'кулинар', 'маникюр', 'продам', 'куплю', 
+            'вакансия', 'работа', 'визажист'
         ]
         
         for item in items:
             text = item.get('text', '').lower()
-            
-            has_dance_context = any(word in text for word in dance_words)
+            if not text:
+                continue
+                
             has_city = any(city in text for city in mo_cities)
             has_junk = any(bad in text for bad in bad_words)
             
-            if has_city and has_dance_context and not has_junk:
+            # Если указан наш регион и нет нецелевого мусора
+            if has_city and not has_junk:
                 owner_id = item.get('owner_id')
                 post_id = item.get('id')
                 link = f"https://vk.com/wall{owner_id}_{post_id}"
                 
+                # Обрезаем длинный текст для удобного чтения в Telegram
                 preview = item.get('text', '')[:250].replace('\n', ' ') + "..."
                 found_battles.append(f"🔥 {preview}\n\n🔗 Ссылка: {link}")
         
-        # Убираем дубликаты
+        # Удаляем повторяющиеся посты
         found_battles = list(set(found_battles))
         
         if found_battles:
+            # Отправляем до 15 найденных баттлов
             for battle in found_battles[:15]:
                 bot.send_message(message.chat.id, battle)
         else:
@@ -98,11 +103,9 @@ def run_telegram_bot():
     bot.infinity_polling(none_stop=True)
 
 if __name__ == "__main__":
-    # Запускаем бота в фоновом режиме
     bot_thread = threading.Thread(target=run_telegram_bot)
     bot_thread.daemon = True
     bot_thread.start()
     
-    # Запускаем сервер для удерживания порта на Render
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
